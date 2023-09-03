@@ -1,51 +1,47 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
-import { evaluate } from 'mathjs';
-import { CaretSortIcon, CheckIcon } from "@radix-ui/react-icons"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-// import { useClickAway } from 'react-use';
+import React, { useState } from 'react';
+
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
-  CommandInput,
   CommandItem,
 } from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { cn } from "@/lib/utils";
-import { ChevronsUpDown, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { evaluate } from "mathjs";
+import { Button } from "./ui/button";
 
-
+interface TagsData {
+  [key: string]: number;
+}
 
 
 const TagInput = () => {
   const [html, setHtml] = useState<JSX.Element | null>();
-  const [inputValue, setInputValue] = useState<string>('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [open, setOpen] = React.useState(true)
-  const [value, setValue] = React.useState("")
-  const [partialValue, setPartialValue] = React.useState("")
+  const [lengthUntil, setLengthUntil] = React.useState(0)
+  const [ans, setAns] = useState<string | null>();
+  const [equation, setEquation] = useState<string>('0');
 
-  const tagsData = {
+  const tagsData: TagsData = {
     "monthlycost": 25,
     "annualcost": 250,
-    "annualycost": 250,
     "revenue": 500,
     "profit": 250
   };
+
+  function calculate(updatedContent: string) {
+    const properties = Object.keys(tagsData);
+    let transformedString = updatedContent;
+
+    for (const property of properties) {
+      const pattern = new RegExp(property, 'g');
+      const value = tagsData[property];
+      const replacement = value.toString();
+      transformedString = transformedString.replace(pattern, replacement);
+    }
+    setAns(evaluate(transformedString))
+  }
+
 
   function transformString(input: string): string {
     const properties = Object.keys(tagsData);
@@ -53,14 +49,13 @@ const TagInput = () => {
 
     for (const property of properties) {
       const pattern = new RegExp(property, 'g');
-      const replacement = `<span class="text-white bg-gray-600 border border-white rounded-lg p-1">${property}</span>`;
+      const replacement = `<span class="dark:text-white text-[#1D283A] bg-transparent border border-[#1D283A] dark:border-gray-500 rounded-md p-1">${property}</span>`;
       transformedString = transformedString.replace(pattern, replacement);
     }
-
     return transformedString;
   }
 
-  function findMatchingProperties(object: any, partialProperty: any) {
+  function findMatchingProperties(object: any, partialProperty: any): string[] {
     const matchingProperties = [];
 
     for (const key in object) {
@@ -79,7 +74,22 @@ const TagInput = () => {
   const suggestFunc = (newValue: string) => {
     const operatorsRegex = /[-+*/]/;
     const words = newValue.trim().split(operatorsRegex);
+
     const newPartialProperty = words[words.length - 1];
+
+    const lastWord = words[words.length - 1];
+    const lastOperators = /[+\-*\/]/.exec(lastWord);
+
+    let lengthUntilLastOperator = 0;
+
+    if (lastOperators) {
+      const lastOperatorIndex = lastOperators.index;
+      lengthUntilLastOperator = lastOperatorIndex >= 0 ? lastOperatorIndex : lastWord.length;
+    } else {
+      lengthUntilLastOperator = lastWord.length;
+    }
+
+    setLengthUntil(lengthUntilLastOperator);
 
     if (newPartialProperty) {
       const matchingProperties = findMatchingProperties(tagsData, newPartialProperty);
@@ -87,69 +97,96 @@ const TagInput = () => {
     } else {
       setSuggestions([]);
     }
-
-    setInputValue(newValue);
   };
+
+  function setValueFunc(content: any) {
+    const transformed = transformString(content);
+    setHtml(<p dangerouslySetInnerHTML={{ __html: transformed }} />);
+  }
 
 
   const handleSuggestionSelect = (suggestion: string) => {
     const contentEditable = document.getElementById("inner");
 
     if (contentEditable) {
-      const operatorsRegex = /[-+*/]/;
       const currentContent = contentEditable.innerText;
-
       const operatorMatch = currentContent.match(/[-+*/]+$/);
       const lastOperator = operatorMatch ? operatorMatch[0] : '';
 
       const words = currentContent.trim().split(lastOperator);
 
-      words[words.length - 1] = suggestion;
-
+      for (let i = 0; i < lengthUntil; i++) {
+        words.pop()
+      }
+      words[words.length] = suggestion;
       const updatedContent = words.join(lastOperator);
-
       contentEditable.innerText = updatedContent;
-    }
 
-    // Clear suggestions and close the suggestion box
+      setValueFunc(updatedContent)
+      calculate(updatedContent)
+      setEquation(updatedContent)
+
+      const range = document.createRange();
+
+      const selection = window.getSelection();
+
+      if (contentEditable.lastChild && selection) {
+        range.setStartAfter(contentEditable.lastChild);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
     setSuggestions([]);
   };
 
 
   const handleInputChange = (e: React.ChangeEvent<HTMLDivElement>) => {
-    const transformed = transformString(e.target.innerText);
     suggestFunc(e.target.innerText)
-    setHtml(<p dangerouslySetInnerHTML={{ __html: transformed }} />);
+    setValueFunc(e.target.innerText)
   };
 
   return (
-    <div className="p-4">
-      <div>
-        {html}
-      </div>
-      <Command>
-        <div
-          contentEditable={true}
-          suppressContentEditableWarning={true}
-          id="inner"
-          className="flex h-10 w-80 items-center border border-white p-4"
-          onInput={handleInputChange}
-        >
-          text
+    <div className="flex w-full flex-col items-start justify-center p-4">
+      <div className="mb-10 flex h-32 w-[800px] items-center justify-between rounded border border-[#1D283A] bg-gray-300 dark:border-gray-500 dark:bg-[#1D283A]">
+        <div className="flex h-12 w-11/12 items-center justify-start overflow-auto px-2">
+          {html}
         </div>
-        <CommandEmpty>No suggestion found.</CommandEmpty>
-        <CommandGroup>
-          {suggestions.map((suggestion, index) => (
-            <CommandItem
-              key={index}
-              onSelect={(currentValue) => {
-                handleSuggestionSelect(currentValue)
-              }}
-            >
-              {suggestion}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        <hr className="h-full w-[1px] border-[#1D283A] bg-[#1D283A] dark:border-gray-500 dark:bg-gray-500" />
+        <div className="flex h-12 w-1/12 items-center justify-center">
+          {ans}
+        </div>
+      </div>
+      <Command className="w-[800px]">
+        <div className="flex h-14 w-full flex-row items-center justify-between rounded-md border border-[#1D283A] bg-gray-300 px-[6px] py-2 dark:border-gray-500 dark:bg-[#1D283A]">
+          <div
+            contentEditable={true}
+            suppressContentEditableWarning={true}
+            id="inner"
+            className="h-10 w-full rounded-none border border-gray-300 bg-gray-300 p-2 focus:outline-none dark:border-[#1D283A] dark:bg-[#1D283A]"
+            onInput={handleInputChange}
+          >
+
+          </div>
+          <div>
+            <Button className="bg-gray-500" onClick={() => { calculate(equation) }}>{'⌘'}</Button><br />
+          </div>
+        </div>
+        {
+          suggestions.length !== 0 ?
+            <CommandGroup className="border border-[#1D283A]">
+              {suggestions.map((suggestion, index) => (
+                <CommandItem
+                  key={index}
+                  onSelect={(currentValue) => {
+                    handleSuggestionSelect(currentValue)
+                  }}
+                >
+                  {suggestion}
+                </CommandItem>
+              ))}
+            </CommandGroup> : <></>
+        }
       </Command>
     </div>
   );
